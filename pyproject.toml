@@ -1,0 +1,57 @@
+[project]
+name = "ibolit"
+version = "1.0.0"
+description = "iBolit healthcare backend (Django + DRF)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "django>=5.2,<5.3",
+    "djangorestframework>=3.15",
+    "drf-spectacular[sidecar]>=0.28",
+    "psycopg[binary]>=3.2",
+    "django-environ>=0.11",
+    "django-cors-headers>=4.4",
+    "phonenumbers>=8.13",
+    "pillow>=10.4",
+    "pypdf>=5.0",
+    "reportlab>=4.2",
+    "djangorestframework-simplejwt>=5.5.1",
+    "pycryptodome>=4.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "factory-boy>=3.3",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ibolit"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["**/migrations/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "DJ", "SIM", "RUF", "PT", "C4", "T20"]
+# E501: the formatter owns line length. RUF001: multilingual strings (ru/kk, ₸, ·) are intended.
+ignore = ["E501", "RUF001", "RUF012"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PT018", "DJ008"]
+"scripts/**" = ["T20"]
+"src/ibolit/config/settings/*.py" = ["F405", "F403"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "ibolit.config.settings.test"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["concurrency: tests that use real concurrent DB connections"]
