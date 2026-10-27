@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from django.conf import settings
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import serializers
@@ -114,18 +113,3 @@ class PreferencesView(APIView):
         data = PreferencesIn(data=request.data)
         data.is_valid(raise_exception=True)
         return Response(_prefs(services.update_preferences(request.user, **data.validated_data)))
-
-
-class DevMockMessagesView(APIView):
-    """ENV=dev/test only: what the mock SMS / push providers 'sent' (OTP codes, pushes)."""
-
-    permission_classes = [Authenticated]
-
-    @extend_schema(tags=["Dev"], summary="Mock SMS / push messages (dev only; 404 elsewhere)", responses={200: OpenApiTypes.OBJECT})
-    def get(self, request: Request) -> Response:
-        if settings.ENV not in ("dev", "test"):
-            raise NotFound()
-        from ibolit.integrations.models import MockMessage
-
-        rows = MockMessage.objects.filter(user_id=request.user.pk).order_by("-created_at")[:50]
-        return Response({"items": [{"channel": m.channel, "title": m.title, "body": m.body, "data": m.data, "created_at": m.created_at, "provider_mode": "mock"} for m in rows]})

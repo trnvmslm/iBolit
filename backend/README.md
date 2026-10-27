@@ -2,7 +2,7 @@
 
 Django REST API for the iBolit iOS telehealth app (university IT Project Management course).
 Every Figma screen has working endpoints on demo data. **All data is fake test data.**
-External services (SMS, Apple sign-in, Apple Pay, push, courier, AI) are mocks; responses that used
+External services (Apple sign-in, Apple Pay, push, courier, AI) are mocks; responses that used
 a mock carry `X-Provider-Mode: mock`. Video uses ZEGOCLOUD tokens when keys are set, otherwise a mock token.
 
 ## Run (Docker)
@@ -34,7 +34,7 @@ uv run pytest -q          # 59 tests incl. one end-to-end journey (tests/test_e2
 src/ibolit/
   config/        settings, root URLs
   core/          errors (problem+json), permissions, pagination, clock, money, OpenAPI hook
-  accounts/      phone auth, OTP, Apple mock, JWT, profile, preferences, devices, data export, support
+  accounts/      phone + password auth, Apple mock, JWT, profile, preferences, devices, data export, support
   directory/     doctors, specialties, reviews, ratings          catalog/   service categories + services
   scheduling/    availability, slots, hold → confirm, cancel, reschedule (no double booking: DB constraint)
   payments/      Apple Pay mock charges, refunds, receipts
@@ -70,12 +70,13 @@ Base URL `http://localhost:8000/api/v1/`. Send `Authorization: Bearer <access>` 
 
 ## Auth
 
-1. `POST auth/signup {phone, password, full_name, accepted_documents: ["terms_of_service:1.0", "privacy_policy:1.0"]}` → `{challenge_id, dev_code}`.
-2. `POST auth/otp/verify {challenge_id, phone, code: "123456", device_id?, device_name?}` → `{access, refresh, user}`.
-3. `POST auth/login {phone, password, device_id?, device_name?}` → same shape.
+1. `POST auth/signup {phone, password, full_name, accepted_documents: ["terms_of_service:1.0", "privacy_policy:1.0"], device_id?, device_name?}`
+   → `201 {access, refresh, user}`. No SMS code: the account is created right away.
+2. `POST auth/login {phone, password, device_id?, device_name?}` → `{access, refresh, user}`.
+3. Change password: `POST me/password {current_password, new_password}` (logged in). There is no "forgot password" without SMS; an admin can reset it in /admin.
 4. Access token lives 15 min (`ACCESS_TOKEN_MINUTES`), refresh 30 days. On 401 `authentication_failed` call
    `POST auth/token/refresh {refresh}`; it returns a **new** refresh token, so store it. The old one stops working.
-5. `POST auth/logout {refresh}`. Apple: `POST auth/apple {identity_token}` (mock token `mock-apple:<any-id>`), then `auth/apple/link` if a phone is needed.
+5. `POST auth/logout` with the `Authorization` header and an empty body ends this device's session (`{refresh}` in the body is optional). Apple: `POST auth/apple {identity_token}` (mock token `mock-apple:<any-id>`), then `auth/apple/link {apple_link_token, phone, accepted_documents}` on the first sign-in creates the account and returns tokens (409 if the number is already registered).
 
 Phones are accepted in any common format and returned as `+7 701 234 56 78`.
 
@@ -132,8 +133,8 @@ Codes: `authentication_failed` (401, also expired token), `permission_denied` (4
 
 | Screen (Figma) | Endpoints |
 |---|---|
-| Onboarding, Sign up, SMS code | `auth/signup` → `auth/otp/verify`, `legal/privacy-policy`, `meta` |
-| Log in, Apple, Forgot password | `auth/login`, `auth/apple`, `auth/apple/link`, `auth/password/forgot`, `auth/password/reset`, `auth/token/refresh`, `auth/logout` |
+| Onboarding, Sign up | `auth/signup`, `legal/privacy-policy`, `meta` |
+| Log in, Apple, Log out | `auth/login`, `auth/apple`, `auth/apple/link`, `auth/token/refresh`, `auth/logout`, `me/password` |
 | Home | `home` |
 | Emergency 103 (F1) | `emergency`, `emergency/taps`, `me/emergency-medical-info` |
 | iBolit AI (F4) | `ai/conversations`, `ai/conversations/{id}/messages`, `ai/video-sessions` (mock) |

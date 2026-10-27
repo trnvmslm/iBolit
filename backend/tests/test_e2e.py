@@ -20,10 +20,10 @@ def test_patient_journey(api_client: APIClient, doctor: Any, doctor_client: APIC
     amox = Medicine.objects.create(name="Amoxicillin", active_ingredient="Amoxicillin", strength="500 mg", category="prescription",
                                    price_minor=240_000, stock=5, requires_prescription=True)
 
-    # signup → OTP → login
-    challenge = api_client.post("/api/v1/auth/signup", {"phone": "+7 701 234 56 78", "password": "Correct-Horse-42", "full_name": "Ilkhan Karimov",
-                                                        "accepted_documents": ["terms_of_service:1.0", "privacy_policy:1.0"]}, format="json").json()
-    assert api_client.post("/api/v1/auth/otp/verify", {"challenge_id": challenge["challenge_id"], "phone": "+77012345678", "code": "123456"}, format="json").status_code == 201
+    # signup (tokens right away) -> login
+    signup = api_client.post("/api/v1/auth/signup", {"phone": "+7 701 234 56 78", "password": "Correct-Horse-42", "full_name": "Ilkhan Karimov",
+                                                     "accepted_documents": ["terms_of_service:1.0", "privacy_policy:1.0"]}, format="json")
+    assert signup.status_code == 201 and signup.json()["access"]
     tokens = api_client.post("/api/v1/auth/login", {"phone": "+77012345678", "password": "Correct-Horse-42"}, format="json").json()
     me = APIClient()
     me.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")

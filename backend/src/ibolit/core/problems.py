@@ -105,21 +105,6 @@ PROBLEM_TITLES: dict[str, dict[str, str]] = {
         "ru": "Эта функция недоступна.",
         "kk": "Бұл мүмкіндік қолжетімсіз.",
     },
-    "otp_invalid": {
-        "en": "The code is incorrect or expired.",
-        "ru": "Код неверный или истёк.",
-        "kk": "Код қате немесе мерзімі өтті.",
-    },
-    "otp_cooldown": {
-        "en": "Please wait before requesting a new code.",
-        "ru": "Подождите перед повторной отправкой кода.",
-        "kk": "Жаңа кодты сұрамас бұрын күтіңіз.",
-    },
-    "phone_not_verified": {
-        "en": "Please verify your phone number.",
-        "ru": "Подтвердите номер телефона.",
-        "kk": "Телефон нөмірін растаңыз.",
-    },
     "slot_unavailable": {
         "en": "This time is no longer available.",
         "ru": "Это время уже занято.",
@@ -275,14 +260,6 @@ class RateLimited(ApiError):
         super().__init__(
             code=code, extra={"retry_after": retry_after}, headers={"Retry-After": str(retry_after)}
         )
-
-
-class StepUpRequired(ApiError):
-    status_code = 403
-    code = "step_up_required"
-
-    def __init__(self) -> None:
-        super().__init__(extra={"allowed_methods": ["password", "otp"]})
 
 
 class FeatureDisabled(ApiError):

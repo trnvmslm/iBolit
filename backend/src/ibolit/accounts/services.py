@@ -1,22 +1,17 @@
-"""Account logic: phone signup with SMS code (mocked), Sign in with Apple (mocked), password reset and devices."""
+"""Account logic: phone + password signup and login, Sign in with Apple (mocked), devices."""
 
 from __future__ import annotations
 
-import hashlib
-import secrets
-import uuid
-from dataclasses import dataclass
 from typing import Any
 
 import phonenumbers
-from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core import signing
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from ibolit.accounts.models import Address, AppleIdentity, Device, LegalAcceptance, OtpChallenge, PatientProfile, User
+from ibolit.accounts.models import Address, AppleIdentity, Device, LegalAcceptance, PatientProfile, User
 from ibolit.core import clock
 from ibolit.core.models import LegalDocument
 from ibolit.core.problems import ApiError, ValidationFailed
@@ -64,38 +59,32 @@ def revoke_device(device: Device) -> None:
     device.delete()
 
 
-@dataclass(frozen=True)
-class Challenge:
-    challenge_id: uuid.UUID
-    dev_code: str | None  # returned only when ENV=dev so the iOS developer can test
+def blacklist_tokens(user: User, device_id: str | None = None) -> None:
+    """Blacklist the user's refresh tokens: all of them, or only those issued to one device."""
+    import jwt
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+    device = Device.objects.filter(pk=device_id, user=user).first() if device_id else None
+    for outstanding in OutstandingToken.objects.filter(user=user, blacklistedtoken__isnull=True):
+        claim = jwt.decode(outstanding.token, options={"verify_signature": False}).get("device")
+        # the first token of a device is stored before the device claim is added, so match its jti too
+        if device_id is None or claim == device_id or (device is not None and outstanding.jti == device.refresh_jti):
+            BlacklistedToken.objects.get_or_create(token=outstanding)
 
 
-def _hash(challenge_id: uuid.UUID, code: str) -> str:
-    return hashlib.sha256(f"{settings.SECRET_KEY}:{challenge_id}:{code}".encode()).hexdigest()
+def logout(user: User | None, *, refresh: str | None, device_id: str | None) -> None:
+    """End the session: the given refresh token, else this device's tokens, else all the user's tokens."""
+    from rest_framework_simplejwt.exceptions import TokenError
 
-
-def send_code(phone: str, purpose: str, payload: dict[str, Any] | None = None) -> Challenge:
-    code = settings.DEV_OTP_CODE if settings.ENV in ("dev", "test") else f"{secrets.randbelow(1_000_000):06d}"
-    challenge = OtpChallenge(purpose=purpose, phone=phone, expires_at=clock.now() + settings.OTP_TTL, payload=payload or {})
-    challenge.code_hash = _hash(challenge.pk, code)
-    challenge.save()
-    get_provider("sms").send_sms(phone, f"Your iBolit code is {code}. It expires in 5 minutes.")
-    return Challenge(challenge.pk, code if settings.ENV in ("dev", "test") else None)
-
-
-def verify_code(challenge_id: uuid.UUID | str, phone: str, code: str, purpose: str) -> OtpChallenge:
-    with transaction.atomic():
-        challenge = OtpChallenge.objects.select_for_update().filter(pk=challenge_id, purpose=purpose, phone=phone).first()
-        if challenge is None or challenge.consumed_at or challenge.expires_at <= clock.now() or challenge.attempts >= settings.OTP_MAX_ATTEMPTS:
-            raise ApiError(code="otp_invalid", status_code=422)
-        challenge.attempts += 1
-        ok = secrets.compare_digest(challenge.code_hash, _hash(challenge.pk, code))
-        if ok:
-            challenge.consumed_at = clock.now()
-        challenge.save(update_fields=["attempts", "consumed_at"])
-    if not ok:
-        raise ApiError(code="otp_invalid", status_code=422)
-    return challenge
+    if refresh:
+        try:
+            RefreshToken(refresh).blacklist()
+        except TokenError:
+            raise ApiError(code="authentication_failed", status_code=401) from None
+        return
+    if user is None:
+        raise ApiError(code="authentication_failed", status_code=401)
+    blacklist_tokens(user, device_id)
 
 
 def _require_legal(accepted: list[str]) -> None:
@@ -104,37 +93,33 @@ def _require_legal(accepted: list[str]) -> None:
         raise ValidationFailed([{"field": "accepted_documents", "message": "Please accept the Terms of Service and Privacy Policy.", "code": "legal_acceptance_required"}])
 
 
-def start_signup(*, phone_raw: str, password: str, full_name: str, accepted_documents: list[str]) -> Challenge:
-    phone = normalize_phone(phone_raw)
-    check_password_strength(password)
-    _require_legal(accepted_documents)
-    if User.objects.filter(phone=phone).exists():
-        raise ApiError(code="phone_taken", status_code=409, detail="This number is already registered. Log in or reset your password.")
-    from django.contrib.auth.hashers import make_password
-
-    return send_code(phone, OtpChallenge.Purpose.SIGNUP, {"password_hash": make_password(password), "full_name": full_name.strip(), "accepted": accepted_documents})
+def _phone_taken() -> ApiError:
+    return ApiError(code="phone_taken", status_code=409, detail="This number is already registered. Log in with your password.")
 
 
-def complete_signup(*, challenge_id: str, phone_raw: str, code: str) -> User:
-    phone = normalize_phone(phone_raw)
-    challenge = verify_code(challenge_id, phone, code, OtpChallenge.Purpose.SIGNUP)
-    payload = challenge.payload
-    with transaction.atomic():
-        user = User.objects.filter(phone=phone).first()
-        if user is None:
-            user = User(phone=phone, role=Role.PATIENT, full_name=payload.get("full_name", ""), phone_verified_at=clock.now())
-            if payload.get("password_hash"):
-                user.password = payload["password_hash"]
+def _create_patient(phone: str, full_name: str, accepted: list[str], password: str | None) -> User:
+    try:
+        with transaction.atomic():
+            user = User(phone=phone, role=Role.PATIENT, full_name=full_name.strip())
+            if password:
+                user.set_password(password)
             else:
                 user.set_unusable_password()
             user.save()
             PatientProfile.objects.create(user=user)
-            accept_legal_documents(user, payload.get("accepted", []))
-        elif not payload.get("apple_subject"):
-            raise ApiError(code="phone_taken", status_code=409)
-        if payload.get("apple_subject"):
-            AppleIdentity.objects.get_or_create(subject=payload["apple_subject"], defaults={"user": user})
+            accept_legal_documents(user, accepted)
+    except IntegrityError:
+        raise _phone_taken() from None
     return user
+
+
+def signup(*, phone_raw: str, password: str, full_name: str, accepted_documents: list[str]) -> User:
+    phone = normalize_phone(phone_raw)
+    check_password_strength(password)
+    _require_legal(accepted_documents)
+    if User.objects.filter(phone=phone).exists():
+        raise _phone_taken()
+    return _create_patient(phone, full_name, accepted_documents, password)
 
 
 def accept_legal_documents(user: User, accepted: list[str]) -> None:
@@ -157,28 +142,24 @@ def apple_sign_in(identity_token: str) -> User | str:
     return signing.dumps({"sub": subject}, salt=_APPLE_SALT)
 
 
-def apple_link_phone(*, link_token: str, phone_raw: str, full_name: str, accepted_documents: list[str]) -> Challenge:
+def apple_link_phone(*, link_token: str, phone_raw: str, full_name: str, accepted_documents: list[str]) -> User:
+    """Create a new account for a first-time Apple sign-in. An existing number must log in with its password."""
     try:
         subject = signing.loads(link_token, salt=_APPLE_SALT, max_age=600)["sub"]
     except signing.BadSignature:
         raise ApiError(code="authentication_failed", status_code=401) from None
     phone = normalize_phone(phone_raw)
-    if not User.objects.filter(phone=phone).exists():
-        _require_legal(accepted_documents)
-    return send_code(phone, OtpChallenge.Purpose.SIGNUP, {"apple_subject": subject, "full_name": full_name, "accepted": accepted_documents})
+    if User.objects.filter(phone=phone).exists():
+        raise _phone_taken()
+    _require_legal(accepted_documents)
+    user = _create_patient(phone, full_name, accepted_documents, password=None)
+    AppleIdentity.objects.get_or_create(subject=subject, defaults={"user": user})
+    return user
 
 
-def start_password_reset(phone_raw: str) -> Challenge:
-    phone = normalize_phone(phone_raw)
-    if not User.objects.filter(phone=phone, is_active=True).exists():
-        return Challenge(uuid.uuid4(), None)  # same answer for unknown numbers
-    return send_code(phone, OtpChallenge.Purpose.RESET_PASSWORD)
-
-
-def complete_password_reset(*, challenge_id: str, phone_raw: str, code: str, new_password: str) -> None:
-    phone = normalize_phone(phone_raw)
-    verify_code(challenge_id, phone, code, OtpChallenge.Purpose.RESET_PASSWORD)
-    user = User.objects.get(phone=phone)
+def change_password(user: User, *, current_password: str, new_password: str) -> None:
+    if not user.check_password(current_password):
+        raise ValidationFailed([{"field": "current_password", "message": "The current password is incorrect.", "code": "invalid_password"}])
     check_password_strength(new_password, user)
     user.set_password(new_password)
     user.save(update_fields=["password"])

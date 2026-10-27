@@ -11,7 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.views import TokenBlacklistView, TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from ibolit.accounts import selectors, services
 from ibolit.accounts.models import PatientProfile, User
@@ -38,7 +38,7 @@ def user_payload(user: User) -> dict[str, Any]:
         age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
     return {
         "id": str(user.pk), "role": user.role, "full_name": user.full_name, "first_name": user.first_name,
-        "phone": format_phone(user.phone), "phone_verified": user.is_phone_verified,
+        "phone": format_phone(user.phone),
         "date_of_birth": user.date_of_birth, "age": age, "language": user.language, "timezone": user.timezone,
     }
 
@@ -97,12 +97,22 @@ class RefreshView(TokenRefreshView):
         return super().post(request, *args, **kwargs)
 
 
-class LogoutView(TokenBlacklistView):
+class LogoutIn(StrictSerializer):
+    refresh = serializers.CharField(required=False, help_text="Optional. Without it, the Authorization header is enough.")
+
+
+class LogoutView(APIView):
     permission_classes = [PublicEndpoint]
 
-    @extend_schema(tags=AUTH, summary="Log out (blacklists the refresh token)")
-    def post(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        return super().post(request, *args, **kwargs)
+    @extend_schema(tags=AUTH, summary="Log out (send the access token in Authorization; the body is optional)",
+                   request=LogoutIn, responses={204: None})
+    def post(self, request: Request) -> Response:
+        data = LogoutIn(data=request.data or {})
+        data.is_valid(raise_exception=True)
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        device_id = request.auth.get("device") if user is not None and request.auth is not None else None
+        services.logout(user, refresh=data.validated_data.get("refresh"), device_id=device_id)
+        return Response(status=204)
 
 
 class SignupIn(StrictSerializer):
@@ -110,18 +120,8 @@ class SignupIn(StrictSerializer):
     password = serializers.CharField(max_length=128, trim_whitespace=False)
     full_name = serializers.CharField(max_length=150)
     accepted_documents = serializers.ListField(child=serializers.CharField(), help_text='e.g. ["terms_of_service:1.0", "privacy_policy:1.0"] from /meta')
-
-
-class OtpIn(StrictSerializer):
-    challenge_id = serializers.UUIDField()
-    phone = serializers.CharField(max_length=32)
-    code = serializers.RegexField(r"^\d{6}$")
     device_id = serializers.CharField(max_length=128, required=False)
     device_name = serializers.CharField(max_length=80, required=False)
-
-
-def _challenge(c: services.Challenge) -> dict[str, Any]:
-    return {"challenge_id": str(c.challenge_id), "dev_code": c.dev_code}
 
 
 class PublicView(APIView):
@@ -131,22 +131,12 @@ class PublicView(APIView):
 
 
 class SignupView(PublicView):
-    @extend_schema(tags=AUTH, summary="Sign up: sends a 6-digit SMS code (mocked)", request=SignupIn, responses={202: OpenApiTypes.OBJECT})
+    @extend_schema(tags=AUTH, summary="Sign up with phone and password → account created, tokens returned", request=SignupIn, responses={201: OpenApiTypes.OBJECT})
     def post(self, request: Request) -> Response:
         data = SignupIn(data=request.data)
         data.is_valid(raise_exception=True)
         v = data.validated_data
-        challenge = services.start_signup(phone_raw=v["phone"], password=v["password"], full_name=v["full_name"], accepted_documents=v["accepted_documents"])
-        return Response(_challenge(challenge), status=202)
-
-
-class OtpVerifyView(PublicView):
-    @extend_schema(tags=AUTH, summary="Confirm the SMS code → account created, tokens returned", request=OtpIn, responses={201: OpenApiTypes.OBJECT})
-    def post(self, request: Request) -> Response:
-        data = OtpIn(data=request.data)
-        data.is_valid(raise_exception=True)
-        v = data.validated_data
-        user = services.complete_signup(challenge_id=str(v["challenge_id"]), phone_raw=v["phone"], code=v["code"])
+        user = services.signup(phone_raw=v["phone"], password=v["password"], full_name=v["full_name"], accepted_documents=v["accepted_documents"])
         return Response(_auth_payload(user, v), status=201)
 
 
@@ -172,41 +162,33 @@ class AppleLinkIn(StrictSerializer):
     phone = serializers.CharField(max_length=32)
     full_name = serializers.CharField(max_length=150, required=False, default="")
     accepted_documents = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    device_id = serializers.CharField(max_length=128, required=False)
+    device_name = serializers.CharField(max_length=80, required=False)
 
 
 class AppleLinkView(PublicView):
-    @extend_schema(tags=AUTH, summary="Link a phone to a new Apple sign-in (then POST /auth/otp/verify)", request=AppleLinkIn, responses={202: OpenApiTypes.OBJECT})
+    @extend_schema(tags=AUTH, summary="First Apple sign-in: add a phone → account created, tokens returned", request=AppleLinkIn, responses={201: OpenApiTypes.OBJECT})
     def post(self, request: Request) -> Response:
         data = AppleLinkIn(data=request.data)
         data.is_valid(raise_exception=True)
         v = data.validated_data
-        challenge = services.apple_link_phone(link_token=v["apple_link_token"], phone_raw=v["phone"], full_name=v["full_name"], accepted_documents=v["accepted_documents"])
-        return Response(_challenge(challenge), status=202)
+        user = services.apple_link_phone(link_token=v["apple_link_token"], phone_raw=v["phone"], full_name=v["full_name"], accepted_documents=v["accepted_documents"])
+        return Response(_auth_payload(user, v), status=201)
 
 
-class ForgotIn(StrictSerializer):
-    phone = serializers.CharField(max_length=32)
-
-
-class ResetIn(OtpIn):
+class PasswordChangeIn(StrictSerializer):
+    current_password = serializers.CharField(max_length=128, trim_whitespace=False)
     new_password = serializers.CharField(max_length=128, trim_whitespace=False)
 
 
-class PasswordForgotView(PublicView):
-    @extend_schema(tags=AUTH, summary="Forgot password: send a reset code", request=ForgotIn, responses={202: OpenApiTypes.OBJECT})
-    def post(self, request: Request) -> Response:
-        data = ForgotIn(data=request.data)
-        data.is_valid(raise_exception=True)
-        return Response(_challenge(services.start_password_reset(data.validated_data["phone"])), status=202)
+class PasswordChangeView(APIView):
+    permission_classes = [Authenticated]
 
-
-class PasswordResetView(PublicView):
-    @extend_schema(tags=AUTH, summary="Set a new password with the code", request=ResetIn, responses={204: None})
+    @extend_schema(tags=ME, summary="Change my password", request=PasswordChangeIn, responses={204: None})
     def post(self, request: Request) -> Response:
-        data = ResetIn(data=request.data)
+        data = PasswordChangeIn(data=request.data)
         data.is_valid(raise_exception=True)
-        v = data.validated_data
-        services.complete_password_reset(challenge_id=str(v["challenge_id"]), phone_raw=v["phone"], code=v["code"], new_password=v["new_password"])
+        services.change_password(request.user, **data.validated_data)
         return Response(status=204)
 
 
