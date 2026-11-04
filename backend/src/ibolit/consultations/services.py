@@ -6,7 +6,6 @@ import datetime as dt
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings

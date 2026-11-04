@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from typing import Any
 
 from django.db.models import prefetch_related_objects
 from drf_spectacular.types import OpenApiTypes

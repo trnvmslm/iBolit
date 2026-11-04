@@ -8,5 +8,4 @@ urlpatterns = [
     path("notifications/read-all", v.MarkAllReadView.as_view(), name="notifications-read-all"),
     path("notifications/<uuid:notification_id>/read", v.MarkReadView.as_view(), name="notification-read"),
     path("me/notification-preferences", v.PreferencesView.as_view(), name="me-notification-preferences"),
-    path("dev/mock-messages", v.DevMockMessagesView.as_view(), name="dev-mock-messages"),
 ]

@@ -87,7 +87,7 @@ def _png() -> bytes:
 
 
 def user(phone: str, *, role: str, name: str, password: str, **extra: Any) -> User:
-    u, created = User.objects.get_or_create(phone=phone, defaults={"role": role, "full_name": name, "phone_verified_at": clock.now(), **extra})
+    u, created = User.objects.get_or_create(phone=phone, defaults={"role": role, "full_name": name, **extra})
     if created:
         u.set_password(password)
         u.save(update_fields=["password"])

@@ -26,7 +26,6 @@ class ProviderTimeout(ProviderError):
 REGISTRY: dict[str, dict[str, str]] = {
     "ai": {"mock": "ibolit.integrations.ai.MockAIProvider"},
     "payment": {"mock": "ibolit.integrations.payments.MockPaymentProvider"},
-    "sms": {"mock": "ibolit.integrations.messaging.MockSmsProvider"},
     "apple": {"mock": "ibolit.integrations.apple.MockAppleVerifier"},
 }
 

@@ -145,7 +145,6 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 PROVIDERS = {
     "ai": env.str("AI_PROVIDER", default="mock"),
     "payment": env.str("PAYMENT_PROVIDER", default="mock"),
-    "sms": env.str("SMS_PROVIDER", default="mock"),
     "apple": env.str("APPLE_PROVIDER", default="mock"),
 }
 # Video: ZEGOCLOUD issues the call token; without keys (or VIDEO_PROVIDER=mock) a mock token is returned.
@@ -171,6 +170,3 @@ VIDEO_GRACE_MINUTES = 15
 APPOINTMENT_REMINDER_MINUTES = 15
 PHARMACY_DELIVERY_FEE_MINOR = 60_000  # 600 ₸ in tiyn
 IDEMPOTENCY_TTL = timedelta(hours=24)
-OTP_TTL = timedelta(minutes=5)
-OTP_MAX_ATTEMPTS = 5
-DEV_OTP_CODE = "123456"

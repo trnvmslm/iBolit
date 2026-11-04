@@ -1,4 +1,4 @@
-"""Auth: signup with SMS code (mock 123456), phone login, refresh, logout, devices, Apple, reset."""
+"""Auth: phone + password signup and login, refresh, logout, devices, Apple, password change."""
 
 from __future__ import annotations
 
@@ -22,37 +22,25 @@ def _legal(db: Any) -> None:
     seed_reference()
 
 
-def _signup(client: APIClient, phone: str = "+7 701 234 56 78") -> dict[str, Any]:
-    r = client.post("/api/v1/auth/signup", {"phone": phone, "password": "Correct-Horse-42", "full_name": "Ilkhan Karimov", "accepted_documents": DOCS}, format="json")
-    assert r.status_code == 202, r.content
-    return r.json()
+def _signup(client: APIClient, phone: str = "+7 701 234 56 78", **extra: Any) -> Any:
+    return client.post("/api/v1/auth/signup", {"phone": phone, "password": "Correct-Horse-42", "full_name": "Ilkhan Karimov",
+                                               "accepted_documents": DOCS, **extra}, format="json")
 
 
 def _login(client: APIClient, phone: str = "+77012345678", password: str = "Correct-Horse-42", **extra: Any) -> Any:
     return client.post("/api/v1/auth/login", {"phone": phone, "password": password, **extra}, format="json")
 
 
-def test_signup_with_dev_code_creates_patient(api_client: APIClient) -> None:
-    challenge = _signup(api_client)
-    assert challenge["dev_code"] == "123456"
-    r = api_client.post("/api/v1/auth/otp/verify", {"challenge_id": challenge["challenge_id"], "phone": "87012345678", "code": "123456",
-                                                    "device_id": "ios-1", "device_name": "iPhone 15"}, format="json")
-    assert r.status_code == 201
+def test_signup_returns_tokens_without_any_code(api_client: APIClient) -> None:
+    r = _signup(api_client, device_id="ios-1", device_name="iPhone 15")
+    assert r.status_code == 201, r.content
     body = r.json()
-    assert body["access"] and body["refresh"]
-    assert body["user"]["phone"] == "+7 701 234 56 78"
+    assert body["access"] and body["refresh"] and body["user"]["phone"] == "+7 701 234 56 78"
     user = User.objects.get(phone="+77012345678")
-    assert user.role == "patient" and user.password.startswith("md5$")
+    assert user.role == "patient" and user.password.startswith("md5$")  # hashed, never stored in clear
     assert Device.objects.filter(user=user, name="iPhone 15").exists()
-
-
-def test_wrong_otp_and_existing_phone(api_client: APIClient) -> None:
-    challenge = _signup(api_client)
-    r = api_client.post("/api/v1/auth/otp/verify", {"challenge_id": challenge["challenge_id"], "phone": "+77012345678", "code": "000000"}, format="json")
-    assert problem(r)["code"] == "otp_invalid"
-    UserFactory(phone="+77019998877")
-    r = api_client.post("/api/v1/auth/signup", {"phone": "+77019998877", "password": "Correct-Horse-42", "full_name": "X", "accepted_documents": DOCS}, format="json")
-    assert r.status_code == 409
+    assert _login(api_client).status_code == 200
+    assert _signup(api_client).status_code == 409  # number already registered
 
 
 def test_signup_validates_password_and_legal(api_client: APIClient) -> None:
@@ -69,15 +57,25 @@ def test_login_normalizes_phone_and_rejects_wrong_password(api_client: APIClient
     assert _login(api_client, password="wrong-password").status_code == 401
 
 
-def test_refresh_rotates_and_logout_blacklists(api_client: APIClient) -> None:
+def test_refresh_rotates_and_logout_with_refresh_blacklists(api_client: APIClient) -> None:
     UserFactory(phone="+77012345678", password="Correct-Horse-42")
     tokens = _login(api_client).json()
     rotated = api_client.post("/api/v1/auth/token/refresh", {"refresh": tokens["refresh"]}, format="json")
     assert rotated.status_code == 200 and rotated.json()["refresh"] != tokens["refresh"]
     assert api_client.post("/api/v1/auth/token/refresh", {"refresh": tokens["refresh"]}, format="json").status_code == 401
     new_refresh = rotated.json()["refresh"]
-    assert api_client.post("/api/v1/auth/logout", {"refresh": new_refresh}, format="json").status_code == 200
+    assert api_client.post("/api/v1/auth/logout", {"refresh": new_refresh}, format="json").status_code == 204
     assert api_client.post("/api/v1/auth/token/refresh", {"refresh": new_refresh}, format="json").status_code == 401
+
+
+def test_logout_with_empty_body_uses_the_access_token(api_client: APIClient) -> None:
+    UserFactory(phone="+77012345678", password="Correct-Horse-42")
+    tokens = _login(api_client, device_id="ios-1").json()
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert APIClient().post("/api/v1/auth/token/refresh", {"refresh": tokens["refresh"]}, format="json").status_code == 401
+    assert APIClient().post("/api/v1/auth/logout").status_code == 401  # no token at all
 
 
 def test_me_requires_token(api_client: APIClient) -> None:
@@ -94,24 +92,30 @@ def test_trusted_devices_and_revoke(api_client: APIClient) -> None:
     assert APIClient().post("/api/v1/auth/token/refresh", {"refresh": tokens["refresh"]}, format="json").status_code == 401
 
 
-def test_apple_mock_links_phone_then_signs_in(api_client: APIClient) -> None:
+def test_apple_mock_creates_account_then_signs_in(api_client: APIClient) -> None:
     first = api_client.post("/api/v1/auth/apple", {"identity_token": "mock-apple:sub-1"}, format="json").json()
     assert first["status"] == "phone_required"
-    challenge = api_client.post("/api/v1/auth/apple/link", {"apple_link_token": first["apple_link_token"], "phone": "+77012345678",
-                                                            "full_name": "Ilkhan", "accepted_documents": DOCS}, format="json").json()
-    assert api_client.post("/api/v1/auth/otp/verify", {"challenge_id": challenge["challenge_id"], "phone": "+77012345678", "code": "123456"}, format="json").status_code == 201
+    linked = api_client.post("/api/v1/auth/apple/link", {"apple_link_token": first["apple_link_token"], "phone": "+77012345678",
+                                                         "full_name": "Ilkhan", "accepted_documents": DOCS}, format="json")
+    assert linked.status_code == 201 and linked.json()["access"]
     assert AppleIdentity.objects.get(subject="sub-1").user.phone == "+77012345678"
     again = api_client.post("/api/v1/auth/apple", {"identity_token": "mock-apple:sub-1"}, format="json").json()
     assert again["status"] == "signed_in" and again["access"]
+    # an existing number cannot be taken over through Apple
+    other = api_client.post("/api/v1/auth/apple", {"identity_token": "mock-apple:sub-2"}, format="json").json()
+    taken = api_client.post("/api/v1/auth/apple/link", {"apple_link_token": other["apple_link_token"], "phone": "+77012345678",
+                                                        "accepted_documents": DOCS}, format="json")
+    assert taken.status_code == 409
 
 
-def test_password_reset(api_client: APIClient) -> None:
-    UserFactory(phone="+77012345678", password="Correct-Horse-42")
-    challenge = api_client.post("/api/v1/auth/password/forgot", {"phone": "+77012345678"}, format="json").json()
-    r = api_client.post("/api/v1/auth/password/reset", {"challenge_id": challenge["challenge_id"], "phone": "+77012345678", "code": "123456",
-                                                        "new_password": "Brand-New-Secret-7"}, format="json")
-    assert r.status_code == 204
-    assert _login(api_client, password="Brand-New-Secret-7").status_code == 200
+def test_change_password(patient_client: APIClient, patient: Any) -> None:
+    patient.set_password("Correct-Horse-42")
+    patient.save()
+    wrong = patient_client.post("/api/v1/me/password", {"current_password": "nope", "new_password": "Brand-New-Secret-7"}, format="json")
+    assert problem(wrong)["errors"][0]["field"] == "current_password"
+    ok = patient_client.post("/api/v1/me/password", {"current_password": "Correct-Horse-42", "new_password": "Brand-New-Secret-7"}, format="json")
+    assert ok.status_code == 204
+    assert _login(APIClient(), phone=patient.phone, password="Brand-New-Secret-7").status_code == 200
 
 
 def test_profile_and_mass_assignment(patient_client: APIClient) -> None:

@@ -1,4 +1,4 @@
-"""Users, patient profile, devices, OTP challenges, Apple identities, legal acceptance."""
+"""Users, patient profile, devices, Apple identities, legal acceptance."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ class UserManager(BaseUserManager["User"]):
         return user
 
     def create_superuser(self, phone: str, password: str | None = None, **extra: Any) -> User:
-        extra.update(is_staff=True, is_superuser=True, role=Role.ADMIN, phone_verified_at=clock.now())
+        extra.update(is_staff=True, is_superuser=True, role=Role.ADMIN)
         return self.create_user(phone, password, **extra)
 
 
@@ -53,7 +53,6 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
     date_of_birth = models.DateField(null=True, blank=True)
     language = models.CharField(max_length=2, choices=Language.choices, default=Language.EN)
     timezone = models.CharField(max_length=64, default="Asia/Almaty")
-    phone_verified_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
@@ -70,10 +69,6 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.full_name or self.phone
-
-    @property
-    def is_phone_verified(self) -> bool:
-        return self.phone_verified_at is not None
 
     @property
     def first_name(self) -> str:
@@ -130,25 +125,6 @@ class Device(BaseModel):
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=["user", "install_id"], name="device_unique"),
         ]
-
-
-class OtpChallenge(BaseModel):
-    """6-digit SMS code (stored hashed) for signup, Apple phone linking or password reset."""
-
-    class Purpose(models.TextChoices):
-        SIGNUP = "signup"
-        RESET_PASSWORD = "reset_password"  # noqa: S105 - enum label
-
-    purpose = models.CharField(max_length=20, choices=Purpose.choices)
-    phone = models.CharField(max_length=16)
-    code_hash = models.CharField(max_length=128)
-    attempts = models.PositiveSmallIntegerField(default=0)
-    expires_at = models.DateTimeField()
-    consumed_at = models.DateTimeField(null=True, blank=True)
-    payload = models.JSONField(default=dict, blank=True)  # pending signup data
-
-    class Meta:
-        db_table = "accounts_otp_challenge"
 
 
 class AppleIdentity(BaseModel):

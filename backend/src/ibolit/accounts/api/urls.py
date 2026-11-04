@@ -4,15 +4,13 @@ from ibolit.accounts.api import views as v
 
 urlpatterns = [
     path("auth/signup", v.SignupView.as_view(), name="auth-signup"),
-    path("auth/otp/verify", v.OtpVerifyView.as_view(), name="auth-otp-verify"),
     path("auth/login", v.LoginView.as_view(), name="auth-login"),
     path("auth/token/refresh", v.RefreshView.as_view(), name="auth-refresh"),
     path("auth/logout", v.LogoutView.as_view(), name="auth-logout"),
     path("auth/apple", v.AppleView.as_view(), name="auth-apple"),
     path("auth/apple/link", v.AppleLinkView.as_view(), name="auth-apple-link"),
-    path("auth/password/forgot", v.PasswordForgotView.as_view(), name="auth-password-forgot"),
-    path("auth/password/reset", v.PasswordResetView.as_view(), name="auth-password-reset"),
     path("me", v.MeView.as_view(), name="me"),
+    path("me/password", v.PasswordChangeView.as_view(), name="me-password"),
     path("me/address", v.AddressView.as_view(), name="me-address"),
     path("me/emergency-contact", v.EmergencyContactView.as_view(), name="me-emergency-contact"),
     path("me/preferences", v.PreferencesView.as_view(), name="me-preferences"),
