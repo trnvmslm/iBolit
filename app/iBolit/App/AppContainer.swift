@@ -7,12 +7,14 @@ final class AppContainer: ObservableObject {
     let router = Router()
     let tokenStore: TokenStore
     let session: SessionManager
-    let api: APIClient
+    let api: any APIClientProtocol
 
     init() {
         let store = KeychainTokenStore()
         self.tokenStore = store
-        let api = APIClient(baseURL: AppConfig.baseURL, tokenStore: store)
+        let api: any APIClientProtocol = AppConfig.useMockAPI
+            ? MockAPIClient()
+            : APIClient(baseURL: AppConfig.baseURL, tokenStore: store)
         self.api = api
         self.session = SessionManager(api: api, tokenStore: store)
         let router = self.router
@@ -36,6 +38,9 @@ final class AppContainer: ObservableObject {
 }
 
 enum AppConfig {
+    /// Demo mode. true = fake in-memory backend (MockAPIClient), false = real server.
+    static let useMockAPI = true
+
     static var baseURL: URL {
         let raw = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String ?? "http://localhost:8000"
         return URL(string: raw)!

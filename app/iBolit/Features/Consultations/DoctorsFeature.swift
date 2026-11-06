@@ -14,8 +14,8 @@ struct DoctorRow: Identifiable, Hashable {
 final class DoctorsViewModel: ObservableObject {
     @Published private(set) var state: Loadable<[DoctorRow]> = .idle
     let specialty: String?
-    private let api: APIClient
-    init(api: APIClient, specialty: String?) { self.api = api; self.specialty = specialty }
+    private let api: any APIClientProtocol
+    init(api: any APIClientProtocol, specialty: String?) { self.api = api; self.specialty = specialty }
 
     func load() async {
         state = .loading

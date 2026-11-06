@@ -5,9 +5,9 @@ import Combine
 /// Owns tokens and the login/signup/logout calls.
 @MainActor
 final class SessionManager: ObservableObject {
-    private let api: APIClient
+    private let api: any APIClientProtocol
     private let tokenStore: TokenStore
-    init(api: APIClient, tokenStore: TokenStore) { self.api = api; self.tokenStore = tokenStore }
+    init(api: any APIClientProtocol, tokenStore: TokenStore) { self.api = api; self.tokenStore = tokenStore }
 
     private var deviceID: String { UIDevice.current.identifierForVendor?.uuidString ?? "unknown" }
     private var deviceName: String { UIDevice.current.name }
@@ -18,13 +18,8 @@ final class SessionManager: ObservableObject {
     }
 
     func signup(phone: String, password: String, fullName: String) async throws {
-        let meta = try await api.json(API.meta)
-        let docs = meta.find("legal_documents", "documents")?.array?.compactMap { doc -> String? in
-            if let s = doc.string { return s }
-            guard let key = doc.str("key", "type", "slug"), let v = doc.str("version") else { return nil }
-            return "\(key):\(v)"
-        } ?? ["terms_of_service:1.0", "privacy_policy:1.0"]
-        let json = try await api.json(API.Auth.signup(phone: phone, password: password, fullName: fullName, documents: docs, deviceID: deviceID, deviceName: deviceName))
+        let json = try await api.json(API.Auth.signup(phone: phone, password: password, fullName: fullName,
+                                                       deviceID: deviceID, deviceName: deviceName))
         try store(json)
     }
 

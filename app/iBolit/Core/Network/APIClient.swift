@@ -1,7 +1,13 @@
 import Foundation
 
 /// URLSession client with Bearer auth and single-flight refresh on 401.
-actor APIClient {
+protocol APIClientProtocol: Sendable {
+    func json(_ endpoint: Endpoint) async throws -> JSONValue
+    func run(_ endpoint: Endpoint) async throws
+    func setOnSessionExpired(_ handler: @escaping @Sendable () async -> Void) async
+}
+
+actor APIClient: APIClientProtocol {
     private let baseURL: URL
     private let tokenStore: TokenStore
     private let session: URLSession

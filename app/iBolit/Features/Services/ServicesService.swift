@@ -1,7 +1,7 @@
 import Foundation
 
 struct ServicesService {
-    let api: APIClient
+    let api: any APIClientProtocol
     func categories() async throws -> [ServiceCategory] {
         try await api.json(API.Services.categories).list("categories").compactMap(ServiceCategory.init(json:))
     }

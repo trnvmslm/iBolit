@@ -4,8 +4,8 @@ import Combine
 @MainActor
 final class ProfileViewModel: ObservableObject {
     @Published private(set) var state: Loadable<(name: String, phone: String)> = .idle
-    private let api: APIClient, session: SessionManager, router: Router
-    init(api: APIClient, session: SessionManager, router: Router) { self.api = api; self.session = session; self.router = router }
+    private let api: any APIClientProtocol, session: SessionManager, router: Router
+    init(api: any APIClientProtocol, session: SessionManager, router: Router) { self.api = api; self.session = session; self.router = router }
 
     func load() async {
         state = .loading

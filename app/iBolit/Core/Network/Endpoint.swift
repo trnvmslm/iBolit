@@ -28,14 +28,15 @@ enum API {
                      body: ["phone": phone, "password": password, "device_id": deviceID, "device_name": deviceName],
                      requiresAuth: false)
         }
-        static func signup(phone: String, password: String, fullName: String, documents: [String], deviceID: String, deviceName: String) -> Endpoint {
+        static func signup(phone: String, password: String, fullName: String, deviceID: String, deviceName: String) -> Endpoint {
             struct Body: Encodable {
                 let phone, password, full_name: String
-                let accepted_documents: [String]
+                /// DEMO ONLY: empty list, no consent is recorded. Remove before release.
+                let accepted_documents: [String] = []
                 let device_id, device_name: String
             }
             return Endpoint("\(v1)/auth/signup", method: .post,
-                            body: Body(phone: phone, password: password, full_name: fullName, accepted_documents: documents, device_id: deviceID, device_name: deviceName),
+                            body: Body(phone: phone, password: password, full_name: fullName, device_id: deviceID, device_name: deviceName),
                             requiresAuth: false)
         }
         static func refresh(_ token: String) -> Endpoint {

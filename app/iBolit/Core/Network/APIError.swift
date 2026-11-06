@@ -25,7 +25,7 @@ enum APIError: LocalizedError {
         case .unauthorized: "Your session has expired. Please sign in again."
         case .problem(let p, _):
             if let fields = p.errors, !fields.isEmpty {
-                fields.compactMap { $0.message }.joined(separator: "\n")
+                fields.map { f in [f.field, f.message].compactMap { $0 }.joined(separator: ": ") }.joined(separator: "\n")
             } else { p.detail ?? p.title ?? "Request failed." }
         case .http(let s): "Server error (\(s))."
         case .decoding: "Unexpected server response."

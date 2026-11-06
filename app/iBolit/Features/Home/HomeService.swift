@@ -1,7 +1,7 @@
 import Foundation
 
 struct HomeService {
-    let api: APIClient
+    let api: any APIClientProtocol
 
     func load() async throws -> HomeContent {
         let json = try await api.json(API.home)

@@ -17,8 +17,8 @@ final class ConsultationsViewModel: ObservableObject {
     enum Tab: String, CaseIterable { case upcoming, past }
     @Published var tab: Tab = .upcoming { didSet { Task { await load() } } }
     @Published private(set) var state: Loadable<[ConsultationRow]> = .idle
-    private let api: APIClient, router: Router
-    init(api: APIClient, router: Router) { self.api = api; self.router = router }
+    private let api: any APIClientProtocol, router: Router
+    init(api: any APIClientProtocol, router: Router) { self.api = api; self.router = router }
 
     func load() async {
         state = .loading

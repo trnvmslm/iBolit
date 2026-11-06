@@ -6,8 +6,8 @@ struct MedCardSection: Identifiable { let id: String; let title: String; let lin
 @MainActor
 final class MedCardViewModel: ObservableObject {
     @Published private(set) var state: Loadable<[MedCardSection]> = .idle
-    private let api: APIClient
-    init(api: APIClient) { self.api = api }
+    private let api: any APIClientProtocol
+    init(api: any APIClientProtocol) { self.api = api }
 
     func load() async {
         state = .loading

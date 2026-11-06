@@ -1,7 +1,7 @@
 import Foundation
 
 struct AIChatService {
-    let api: APIClient
+    let api: any APIClientProtocol
 
     struct Started { let id: String; let messages: [ChatMessage] }
 
