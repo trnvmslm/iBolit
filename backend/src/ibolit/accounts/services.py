@@ -87,17 +87,16 @@ def logout(user: User | None, *, refresh: str | None, device_id: str | None) -> 
     blacklist_tokens(user, device_id)
 
 
-def _require_legal(accepted: list[str]) -> None:
-    current = {f"{d.kind}:{d.version}" for d in LegalDocument.objects.filter(is_current=True)}
-    if not current <= set(accepted):
-        raise ValidationFailed([{"field": "accepted_documents", "message": "Please accept the Terms of Service and Privacy Policy.", "code": "legal_acceptance_required"}])
+def _require_terms(accepted_terms: bool) -> None:
+    if not accepted_terms:
+        raise ValidationFailed([{"field": "accepted_terms", "message": "Please accept the Terms of Service and Privacy Policy.", "code": "legal_acceptance_required"}])
 
 
 def _phone_taken() -> ApiError:
     return ApiError(code="phone_taken", status_code=409, detail="This number is already registered. Log in with your password.")
 
 
-def _create_patient(phone: str, full_name: str, accepted: list[str], password: str | None) -> User:
+def _create_patient(phone: str, full_name: str, password: str | None) -> User:
     try:
         with transaction.atomic():
             user = User(phone=phone, role=Role.PATIENT, full_name=full_name.strip())
@@ -107,19 +106,19 @@ def _create_patient(phone: str, full_name: str, accepted: list[str], password: s
                 user.set_unusable_password()
             user.save()
             PatientProfile.objects.create(user=user)
-            accept_legal_documents(user, accepted)
+            accept_legal_documents(user, [f"{d.kind}:{d.version}" for d in LegalDocument.objects.filter(is_current=True)])
     except IntegrityError:
         raise _phone_taken() from None
     return user
 
 
-def signup(*, phone_raw: str, password: str, full_name: str, accepted_documents: list[str]) -> User:
+def signup(*, phone_raw: str, password: str, full_name: str, accepted_terms: bool) -> User:
     phone = normalize_phone(phone_raw)
     check_password_strength(password)
-    _require_legal(accepted_documents)
+    _require_terms(accepted_terms)
     if User.objects.filter(phone=phone).exists():
         raise _phone_taken()
-    return _create_patient(phone, full_name, accepted_documents, password)
+    return _create_patient(phone, full_name, password)
 
 
 def accept_legal_documents(user: User, accepted: list[str]) -> None:
@@ -142,7 +141,7 @@ def apple_sign_in(identity_token: str) -> User | str:
     return signing.dumps({"sub": subject}, salt=_APPLE_SALT)
 
 
-def apple_link_phone(*, link_token: str, phone_raw: str, full_name: str, accepted_documents: list[str]) -> User:
+def apple_link_phone(*, link_token: str, phone_raw: str, full_name: str, accepted_terms: bool) -> User:
     """Create a new account for a first-time Apple sign-in. An existing number must log in with its password."""
     try:
         subject = signing.loads(link_token, salt=_APPLE_SALT, max_age=600)["sub"]
@@ -151,8 +150,8 @@ def apple_link_phone(*, link_token: str, phone_raw: str, full_name: str, accepte
     phone = normalize_phone(phone_raw)
     if User.objects.filter(phone=phone).exists():
         raise _phone_taken()
-    _require_legal(accepted_documents)
-    user = _create_patient(phone, full_name, accepted_documents, password=None)
+    _require_terms(accepted_terms)
+    user = _create_patient(phone, full_name, password=None)
     AppleIdentity.objects.get_or_create(subject=subject, defaults={"user": user})
     return user
 

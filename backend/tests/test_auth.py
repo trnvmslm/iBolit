@@ -7,14 +7,13 @@ from typing import Any
 import pytest
 from rest_framework.test import APIClient
 
-from ibolit.accounts.models import AppleIdentity, Device, User
+from ibolit.accounts.models import AppleIdentity, User
 from ibolit.core import clock
 from ibolit.seed.reference import seed_reference
 from tests.factories import UserFactory
 from tests.helpers import problem
 
 pytestmark = pytest.mark.django_db
-DOCS = ["terms_of_service:1.0", "privacy_policy:1.0"]
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +23,7 @@ def _legal(db: Any) -> None:
 
 def _signup(client: APIClient, phone: str = "+7 701 234 56 78", **extra: Any) -> Any:
     return client.post("/api/v1/auth/signup", {"phone": phone, "password": "Correct-Horse-42", "full_name": "Ilkhan Karimov",
-                                               "accepted_documents": DOCS, **extra}, format="json")
+                                               "accepted_terms": True, **extra}, format="json")
 
 
 def _login(client: APIClient, phone: str = "+77012345678", password: str = "Correct-Horse-42", **extra: Any) -> Any:
@@ -32,22 +31,22 @@ def _login(client: APIClient, phone: str = "+77012345678", password: str = "Corr
 
 
 def test_signup_returns_tokens_without_any_code(api_client: APIClient) -> None:
-    r = _signup(api_client, device_id="ios-1", device_name="iPhone 15")
+    r = _signup(api_client)
     assert r.status_code == 201, r.content
     body = r.json()
     assert body["access"] and body["refresh"] and body["user"]["phone"] == "+7 701 234 56 78"
     user = User.objects.get(phone="+77012345678")
     assert user.role == "patient" and user.password.startswith("md5$")  # hashed, never stored in clear
-    assert Device.objects.filter(user=user, name="iPhone 15").exists()
     assert _login(api_client).status_code == 200
     assert _signup(api_client).status_code == 409  # number already registered
 
 
 def test_signup_validates_password_and_legal(api_client: APIClient) -> None:
-    weak = api_client.post("/api/v1/auth/signup", {"phone": "+77012345678", "password": "123", "full_name": "X", "accepted_documents": DOCS}, format="json")
+    weak = api_client.post("/api/v1/auth/signup", {"phone": "+77012345678", "password": "123", "full_name": "X", "accepted_terms": True}, format="json")
     assert weak.status_code == 422
-    no_legal = api_client.post("/api/v1/auth/signup", {"phone": "+77012345678", "password": "Correct-Horse-42", "full_name": "X", "accepted_documents": []}, format="json")
+    no_legal = api_client.post("/api/v1/auth/signup", {"phone": "+77012345678", "password": "Correct-Horse-42", "full_name": "X", "accepted_terms": False}, format="json")
     assert problem(no_legal)["errors"][0]["code"] == "legal_acceptance_required"
+    assert api_client.post("/api/v1/auth/signup", {"phone": "+77012345678", "password": "Correct-Horse-42", "full_name": "X"}, format="json").status_code == 422
 
 
 def test_login_normalizes_phone_and_rejects_wrong_password(api_client: APIClient) -> None:
@@ -96,7 +95,7 @@ def test_apple_mock_creates_account_then_signs_in(api_client: APIClient) -> None
     first = api_client.post("/api/v1/auth/apple", {"identity_token": "mock-apple:sub-1"}, format="json").json()
     assert first["status"] == "phone_required"
     linked = api_client.post("/api/v1/auth/apple/link", {"apple_link_token": first["apple_link_token"], "phone": "+77012345678",
-                                                         "full_name": "Ilkhan", "accepted_documents": DOCS}, format="json")
+                                                         "full_name": "Ilkhan", "accepted_terms": True}, format="json")
     assert linked.status_code == 201 and linked.json()["access"]
     assert AppleIdentity.objects.get(subject="sub-1").user.phone == "+77012345678"
     again = api_client.post("/api/v1/auth/apple", {"identity_token": "mock-apple:sub-1"}, format="json").json()
@@ -104,7 +103,7 @@ def test_apple_mock_creates_account_then_signs_in(api_client: APIClient) -> None
     # an existing number cannot be taken over through Apple
     other = api_client.post("/api/v1/auth/apple", {"identity_token": "mock-apple:sub-2"}, format="json").json()
     taken = api_client.post("/api/v1/auth/apple/link", {"apple_link_token": other["apple_link_token"], "phone": "+77012345678",
-                                                        "accepted_documents": DOCS}, format="json")
+                                                        "accepted_terms": True}, format="json")
     assert taken.status_code == 409
 
 

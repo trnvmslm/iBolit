@@ -70,13 +70,13 @@ Base URL `http://localhost:8000/api/v1/`. Send `Authorization: Bearer <access>` 
 
 ## Auth
 
-1. `POST auth/signup {phone, password, full_name, accepted_documents: ["terms_of_service:1.0", "privacy_policy:1.0"], device_id?, device_name?}`
+1. `POST auth/signup {phone, password, full_name, accepted_terms: true}` (`accepted_terms` must be `true`: Terms of Service and Privacy Policy)
    → `201 {access, refresh, user}`. No SMS code: the account is created right away.
 2. `POST auth/login {phone, password, device_id?, device_name?}` → `{access, refresh, user}`.
 3. Change password: `POST me/password {current_password, new_password}` (logged in). There is no "forgot password" without SMS; an admin can reset it in /admin.
 4. Access token lives 15 min (`ACCESS_TOKEN_MINUTES`), refresh 30 days. On 401 `authentication_failed` call
    `POST auth/token/refresh {refresh}`; it returns a **new** refresh token, so store it. The old one stops working.
-5. `POST auth/logout` with the `Authorization` header and an empty body ends this device's session (`{refresh}` in the body is optional). Apple: `POST auth/apple {identity_token}` (mock token `mock-apple:<any-id>`), then `auth/apple/link {apple_link_token, phone, accepted_documents}` on the first sign-in creates the account and returns tokens (409 if the number is already registered).
+5. `POST auth/logout` with the `Authorization` header and an empty body ends this device's session (`{refresh}` in the body is optional). Apple: `POST auth/apple {identity_token}` (mock token `mock-apple:<any-id>`), then `auth/apple/link {apple_link_token, phone, full_name, accepted_terms: true}` on the first sign-in creates the account and returns tokens (409 if the number is already registered).
 
 Phones are accepted in any common format and returned as `+7 701 234 56 78`.
 

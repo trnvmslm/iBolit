@@ -9,3 +9,6 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 MEDIA_ROOT = BASE_DIR / ".test-media"  # noqa: F405
 REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": {"auth": "10000/min"}}  # noqa: F405
 ALLOWED_HOSTS = ["testserver", "localhost"]
+VIDEO_PROVIDER = "mock"
+ZEGO_APP_ID = 0
+ZEGO_SERVER_SECRET = ""

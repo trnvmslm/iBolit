@@ -50,12 +50,8 @@ def emergency_contact_payload(profile: PatientProfile | None) -> dict[str, Any]:
     return {"name": profile.emergency_contact_name, "phone": phone, "display": f"{profile.emergency_contact_name} · {phone}"}
 
 
-def _auth_payload(user: User, data: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Tokens + user. If the request names a device ("device_id", "device_name"), register it."""
-    device = None
-    if data and data.get("device_id"):
-        device = services.register_device(user, install_id=str(data["device_id"])[:128], name=str(data.get("device_name") or "iPhone")[:80])
-    return {**services.tokens_for(user, device), "user": user_payload(user)}
+def _auth_payload(user: User) -> dict[str, Any]:
+    return {**services.tokens_for(user), "user": user_payload(user)}
 
 
 # ------------------------------------------------------------------------------ auth
@@ -119,9 +115,7 @@ class SignupIn(StrictSerializer):
     phone = serializers.CharField(max_length=32, help_text="+7 701 234 56 78")
     password = serializers.CharField(max_length=128, trim_whitespace=False)
     full_name = serializers.CharField(max_length=150)
-    accepted_documents = serializers.ListField(child=serializers.CharField(), help_text='e.g. ["terms_of_service:1.0", "privacy_policy:1.0"] from /meta')
-    device_id = serializers.CharField(max_length=128, required=False)
-    device_name = serializers.CharField(max_length=80, required=False)
+    accepted_terms = serializers.BooleanField(help_text="Must be true: accepts the Terms of Service and Privacy Policy")
 
 
 class PublicView(APIView):
@@ -136,14 +130,12 @@ class SignupView(PublicView):
         data = SignupIn(data=request.data)
         data.is_valid(raise_exception=True)
         v = data.validated_data
-        user = services.signup(phone_raw=v["phone"], password=v["password"], full_name=v["full_name"], accepted_documents=v["accepted_documents"])
-        return Response(_auth_payload(user, v), status=201)
+        user = services.signup(phone_raw=v["phone"], password=v["password"], full_name=v["full_name"], accepted_terms=v["accepted_terms"])
+        return Response(_auth_payload(user), status=201)
 
 
 class AppleIn(StrictSerializer):
     identity_token = serializers.CharField(max_length=8000)
-    device_id = serializers.CharField(max_length=128, required=False)
-    device_name = serializers.CharField(max_length=80, required=False)
 
 
 class AppleView(PublicView):
@@ -154,16 +146,14 @@ class AppleView(PublicView):
         result = services.apple_sign_in(data.validated_data["identity_token"])
         if isinstance(result, str):
             return Response({"status": "phone_required", "apple_link_token": result})
-        return Response({"status": "signed_in", **_auth_payload(result, data.validated_data)})
+        return Response({"status": "signed_in", **_auth_payload(result)})
 
 
 class AppleLinkIn(StrictSerializer):
     apple_link_token = serializers.CharField()
     phone = serializers.CharField(max_length=32)
     full_name = serializers.CharField(max_length=150, required=False, default="")
-    accepted_documents = serializers.ListField(child=serializers.CharField(), required=False, default=list)
-    device_id = serializers.CharField(max_length=128, required=False)
-    device_name = serializers.CharField(max_length=80, required=False)
+    accepted_terms = serializers.BooleanField(required=False, default=False, help_text="Must be true for a new account")
 
 
 class AppleLinkView(PublicView):
@@ -172,8 +162,8 @@ class AppleLinkView(PublicView):
         data = AppleLinkIn(data=request.data)
         data.is_valid(raise_exception=True)
         v = data.validated_data
-        user = services.apple_link_phone(link_token=v["apple_link_token"], phone_raw=v["phone"], full_name=v["full_name"], accepted_documents=v["accepted_documents"])
-        return Response(_auth_payload(user, v), status=201)
+        user = services.apple_link_phone(link_token=v["apple_link_token"], phone_raw=v["phone"], full_name=v["full_name"], accepted_terms=v["accepted_terms"])
+        return Response(_auth_payload(user), status=201)
 
 
 class PasswordChangeIn(StrictSerializer):
